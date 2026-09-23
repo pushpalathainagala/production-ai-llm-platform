@@ -73,3 +73,15 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     return verify_token(credentials.credentials)
+
+
+def require_roles(allowed_roles: list[str]):
+    def role_checker(current_user: dict = Depends(get_current_user)):
+        user_role = current_user.get("role", "user")
+        if user_role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied: role '{user_role}' lacks required permissions ({allowed_roles})",
+            )
+        return current_user
+    return role_checker

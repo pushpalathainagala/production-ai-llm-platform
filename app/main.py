@@ -1,26 +1,33 @@
-from fastapi import FastAPI, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-from fastapi.responses import Response
+import logging
 from time import perf_counter
 
-from app.metrics import REQUEST_COUNT, REQUEST_LATENCY
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.responses import Response
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
+from app.config import settings
+from app.metrics import REQUEST_COUNT, REQUEST_LATENCY
 from app.database import Base, engine, get_db
 from app import models
 from app.schemas import LoginRequest, TokenResponse, ChatRequest
-from app.auth import verify_password, create_access_token, get_current_user
-from app.llm import ask_gemini
-from app.redis_client import redis_client
+from app.auth import verify_password, create_access_token, get_current_user, require_roles
+from app.llm import ask_gemini, LLMTimeoutError, LLMProviderError
+from app.redis_client import get_cached_response, set_cached_response, check_redis
 
+logger = logging.getLogger(__name__)
 
-Base.metadata.create_all(bind=engine)
+# Safe database initialization
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as exc:
+    logger.warning(f"Database table initialization skipped (DB may not be ready yet): {exc}")
 
 app = FastAPI(
-    
     title="AI/LLM Platform API",
-    description="Production-style AI Question Answering API",
-    version="1.0.0",
+    description="Production-grade AI Question Answering API with Caching, Auth, and Observability",
+    version="1.1.0",
 )
 
 
@@ -45,9 +52,25 @@ async def track_requests(request, call_next):
 
     return response
 
+
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    db_status = "connected"
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "unreachable"
+
+    redis_status = "connected" if check_redis() else "unreachable"
+    overall_status = "healthy" if db_status == "connected" and redis_status == "connected" else "degraded"
+
+    return {
+        "status": overall_status,
+        "database": db_status,
+        "redis": redis_status,
+        "service": "ai-llm-platform",
+    }
 
 
 @app.post("/auth/login", response_model=TokenResponse)
@@ -88,7 +111,8 @@ def chat(
 ):
     cache_key = f"chat:{chat_data.question.strip().lower()}"
 
-    cached_answer = redis_client.get(cache_key)
+    # Attempt cache lookup with graceful degradation if Redis is down
+    cached_answer = get_cached_response(cache_key)
 
     if cached_answer:
         return {
@@ -97,15 +121,30 @@ def chat(
             "question": chat_data.question,
             "answer": cached_answer,
             "cached": True,
+            "tokens_used": 0,
+            "model": "redis-cache",
         }
 
-    answer = ask_gemini(chat_data.question)
+    try:
+        answer, tokens_used, model_used = ask_gemini(chat_data.question)
+    except LLMTimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"LLM request timed out: {exc}",
+        )
+    except LLMProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"LLM upstream provider failure: {exc}",
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error while generating LLM response: {exc}",
+        )
 
-    redis_client.setex(
-        cache_key,
-        300,
-        answer,
-    )
+    # Persist in cache (silently ignores if Redis is unreachable)
+    set_cached_response(cache_key, answer, ttl=300)
 
     return {
         "username": current_user["username"],
@@ -113,7 +152,24 @@ def chat(
         "question": chat_data.question,
         "answer": answer,
         "cached": False,
+        "tokens_used": tokens_used,
+        "model": model_used,
     }
+
+
+@app.get("/admin/system-status")
+def admin_status(
+    current_user: dict = Depends(require_roles(["admin"])),
+):
+    """Admin-only endpoint demonstrating Role-Based Access Control (RBAC)."""
+    return {
+        "admin_user": current_user["username"],
+        "role": current_user["role"],
+        "redis_healthy": check_redis(),
+        "primary_model": settings.PRIMARY_MODEL,
+        "fallback_model": settings.FALLBACK_MODEL,
+    }
+
 
 @app.get("/metrics")
 def metrics():
@@ -121,3 +177,4 @@ def metrics():
         content=generate_latest(),
         media_type=CONTENT_TYPE_LATEST,
     )
+
