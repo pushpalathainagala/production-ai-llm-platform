@@ -16,7 +16,6 @@ pwd_context = CryptContext(
     deprecated="auto",
 )
 
-
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
@@ -84,4 +83,4 @@ def require_roles(allowed_roles: list[str]):
                 detail=f"Access denied: role '{user_role}' lacks required permissions ({allowed_roles})",
             )
         return current_user
-    return role_checker
+    return role_checker
