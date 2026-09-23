@@ -235,8 +235,8 @@ If Redis crashes or becomes unreachable:
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/varalakshmikonjeti/AI-LLM-Platform-DevOps.git
-   cd AI-LLM-Platform-DevOps
+   git clone https://github.com/pushpalathainagala/production-ai-llm-platform.git
+   cd production-ai-llm-platform
    ```
 
 2. **Configure environment variables**:
@@ -440,7 +440,7 @@ Use this exact, professional script to record your maximum 5-minute video submis
 ### **[0:00 – 0:45] Minute 1: Introduction & Architecture Overview**
 * **What to show on screen**: Open VS Code displaying the project structure and the Architecture diagram in `README.md`.
 * **What to say**:
-  > *"Hello everyone! My name is [Your Name], and today I am excited to present my submission for the AI/LLM Platform & DevOps Engineer assessment.*
+  > *"Hello everyone! My name is Pushpalatha, and today I am excited to present my submission for the AI/LLM Platform & DevOps Engineer assessment.*
   > 
   > *In this project, I have designed and implemented a production-ready AI Question-Answering API built on FastAPI, PostgreSQL, Redis, Docker, and Prometheus.*
   > 
@@ -513,6 +513,6 @@ Use this exact, professional script to record your maximum 5-minute video submis
 ---
 
 ## 12. License & Author
-- **Author**: Engineering Assessment Candidate
-- **Repository**: [AI-LLM-Platform-DevOps](https://github.com/varalakshmikonjeti/AI-LLM-Platform-DevOps)
+- **Author**: Pushpalatha Inagala
+- **Repository**: [production-ai-llm-platform](https://github.com/pushpalathainagala/production-ai-llm-platform)
 - **License**: MIT
