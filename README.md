@@ -22,7 +22,7 @@ A production-grade, highly resilient **AI Question-Answering & LLM Platform** en
 8. [Automated Testing](#8-automated-testing)
 9. [High-Throughput Scaling (100–500 RPS)](#9-high-throughput-scaling-100500-rps)
 10. [Production Migration Guide (10 to 10,000 Users)](#10-production-migration-guide-10-to-10000-users)
-11. [5-Minute Loom Video Presentation Script](#11-5-minute-loom-video-presentation-script)
+11. [Summary of My Work & Implementation Highlights](#11-summary-of-my-work--implementation-highlights)
 
 ---
 
@@ -431,84 +431,49 @@ Migrate from single EC2 to managed Kubernetes (EKS) or AWS ECS. Containerized Fa
 
 ---
 
-## 11. 5-Minute Loom Video Presentation Script
+## 11. Summary of My Work & Implementation Highlights
 
-Use this exact, professional script to record your maximum 5-minute video submission. Follow the on-screen cues and speaking notes.
+Throughout this project, I worked on and implemented several critical architectural enhancements to ensure this AI Question-Answering platform meets real-world production standards:
 
----
+### 1. Resilient LLM Gateway & Fallback Engineering
+- **What I worked on**: I developed a resilient LLM integration layer for Google Gemini that protects the API against external provider downtime and latency spikes.
+- **What I implemented**:
+  - Implemented configurable request timeouts (`LLM_TIMEOUT`) so stalled upstream queries do not block client connections.
+  - Implemented exponential backoff retries to absorb transient network blips and rate limits.
+  - Implemented an automated **secondary model fallback system**: if the primary model (`gemini-2.5-flash`) fails across retry attempts, the gateway automatically falls back to `gemini-1.5-flash`.
+  - Implemented structured HTTP exception handling, returning `504 Gateway Timeout` or `502 Bad Gateway` with clear error details instead of generic 500 crashes.
 
-### **[0:00 – 0:45] Minute 1: Introduction & Architecture Overview**
-* **What to show on screen**: Open VS Code displaying the project structure and the Architecture diagram in `README.md`.
-* **What to say**:
-  > *"Hello everyone! My name is Pushpalatha, and today I am excited to present my submission for the AI/LLM Platform & DevOps Engineer assessment.*
-  > 
-  > *In this project, I have designed and implemented a production-ready AI Question-Answering API built on FastAPI, PostgreSQL, Redis, Docker, and Prometheus.*
-  > 
-  > *Rather than a simple prototype, this application addresses the real-world operational challenges of LLM engineering: stateless horizontal scaling, response caching with graceful degradation, automated retries with fallback models, structured token tracking, and enterprise authentication with RBAC.*
-  > 
-  > *Let's take a quick look at the architecture: incoming requests pass through a load balancer to stateless FastAPI instances. Responses are cached in Redis to minimize LLM provider costs, persistent user records are safeguarded in PostgreSQL, and all inference operations are monitored with Prometheus."*
+### 2. Live Token Tracking & Prometheus Observability
+- **What I worked on**: I integrated observability directly into the inference lifecycle rather than treating it as an afterthought.
+- **What I implemented**:
+  - Implemented an `llm_token_usage_total` counter in Prometheus that extracts token usage metadata directly from LLM responses and tracks consumption over time.
+  - Added latency observation histograms (`api_request_latency_seconds`) and total request counters (`api_request_count`) partitioned by HTTP method, endpoint, and status code.
+  - Added Prometheus container orchestration into `docker-compose.yml` mapped to scrape configuration.
 
----
+### 3. High-Performance Caching with Graceful Degradation
+- **What I worked on**: I built an intelligent Redis caching layer to eliminate redundant LLM calls and reduce response latency.
+- **What I implemented**:
+  - Implemented normalized query hashing (`chat:<question>`) with a 5-minute TTL to serve frequent queries in sub-5ms.
+  - Implemented **graceful degradation**: if Redis is unreachable or crashes, the application catches connection errors, logs an alert, bypasses the cache, and serves the response directly from the LLM without failing the user request.
 
-### **[0:45 – 1:45] Minute 2: Code Walkthrough & Key Implementations**
-* **What to show on screen**: Open `app/main.py` and `app/llm.py`.
-* **What to say**:
-  > *"Let's examine the core codebase. In `app/main.py`, we implement the required endpoints: `/auth/login`, `/chat`, `/health`, and `/metrics`.*
-  > 
-  > *In `app/llm.py`, we implement a resilient LLM Gateway for Google Gemini. Notice three critical production features here:*
-  > 1. *First, **Timeout & Retries**: We enforce a configurable 30-second timeout and exponential backoff retry logic to handle transient network blips.*
-  > 2. *Second, **Model Fallback**: If our primary model encounters persistent failures, it automatically switches to our secondary fallback model before raising clean 504 Gateway Timeout or 502 Bad Gateway HTTP errors.*
-  > 3. *Third, **Token Accounting**: Every response extracts token usage from the LLM metadata and increments our Prometheus `llm_token_usage_total` counter.*
-  > 
-  > *In `app/redis_client.py`, we implemented graceful degradation: if Redis is temporarily offline, the API does not crash—it simply logs a warning, bypasses the cache, and serves the answer directly."*
+### 4. Enterprise Authentication & Role-Based Access Control (RBAC)
+- **What I worked on**: I secured the API with JWT tokens and enforced granular role separation.
+- **What I implemented**:
+  - Implemented JWT token generation with expiration and role claims, secured by BCrypt password hashing.
+  - Implemented reusable FastAPI dependency injection guards (`require_roles`) to enforce RBAC.
+  - Added the `GET /admin/system-status` endpoint to demonstrate strict permission gating between Admin and User roles (returning `403 Forbidden` for non-admin accounts).
 
----
+### 5. Deep Health Check & Fault-Tolerant Local Setup
+- **What I worked on**: I improved operational reliability for orchestrated environments (Kubernetes/Docker).
+- **What I implemented**:
+  - Upgraded `GET /health` into a deep health inspection endpoint that verifies active connections to PostgreSQL and Redis.
+  - Built an automatic database fallback mechanism: when running locally without a live PostgreSQL instance, the engine gracefully defaults to SQLite (`sqlite:///./ai_platform.db`) for immediate offline developer testing.
 
-### **[1:45 – 2:45] Minute 3: Live API Demonstration & Docker Stack**
-* **What to show on screen**: Terminal or Swagger UI (`http://localhost:8000/docs`).
-* **What to say**:
-  > *"Now let's see the application in action. All services—FastAPI, PostgreSQL, Redis, and Prometheus—are orchestrated with Docker Compose.*
-  > 
-  > *First, let's call `GET /health`. You can see it performs a deep health check, confirming both database and Redis connectivity with a 200 OK.*
-  > 
-  > *Next, let's authenticate via `POST /auth/login`. We receive a signed JWT token containing the user identity and assigned role.*
-  > 
-  > *Using this Bearer token, let's execute `POST /chat`. On the first request, the response is generated by the LLM with `cached: false`, reporting the exact token count and model used.*
-  > 
-  > *When I send the exact same question a second time, observe the latency: it returns almost instantaneously with `cached: true` directly from Redis.*
-  > 
-  > *Finally, checking `GET /metrics` shows our Prometheus scrape target actively recording request count, latency histograms, and total LLM token consumption."*
-
----
-
-### **[2:45 – 3:45] Minute 4: Scalability & High-Throughput (100–500 RPS)**
-* **What to show on screen**: Scroll to Section 9 of `README.md` (Scaling Scenario diagram).
-* **What to say**:
-  > *"Now let's discuss Section 4 of the assessment: scaling from 100 requests per second to 500 requests per second during peak bursts.*
-  > 
-  > *Handling 500 RPS directly against an LLM provider is not feasible due to strict rate limits and high inference latency. My architectural solution incorporates:*
-  > 1. *Horizontal Pod Autoscaler (HPA) on Kubernetes to dynamically scale our stateless FastAPI pods between 3 and 15 replicas based on CPU and request rate.*
-  > 2. *Redis in-memory caching to absorb 40 to 60 percent of repetitive queries in single-digit milliseconds.*
-  > 3. *Distributed rate limiting using Redis token buckets to protect against abusive traffic.*
-  > 4. *Asynchronous queue decoupling using Redis Streams or SQS: long-running queries are buffered and executed by worker pools throttled by a concurrency limiter to stay strictly within provider RPM and TPM limits.*
-  > 5. *Circuit breakers that trip if downstream latency surges, serving cached or fallback responses to guarantee high availability."*
-
----
-
-### **[3:45 – 4:45] Minute 5: Migration Strategy (10 to 10,000 Users) & Wrap-Up**
-* **What to show on screen**: Scroll to Section 10 of `README.md` (Migration Plan & Phased Pipeline).
-* **What to say**:
-  > *"Finally, Section 5: migrating from a single EC2 server with 10 users to an enterprise-grade platform serving 10,000 users with zero downtime.*
-  > 
-  > *My 5-phase migration strategy consists of:*
-  > - *Replacing the single server with an **Amazon EKS / ECS multi-AZ cluster** fronted by an Application Load Balancer.*
-  > - *Migrating local database data to **Amazon Aurora PostgreSQL Multi-AZ** using AWS DMS for continuous Change Data Capture, coupled with **RDS Proxy** for connection pooling.*
-  > - *Transitioning secrets from local `.env` files to **AWS Secrets Manager**, injected dynamically into Kubernetes pods.*
-  > - *Executing a **Canary Deployment**: we route 5% of traffic through Route 53 weighted DNS, monitor error rates and latency in Grafana, and incrementally shift to 100% traffic with zero user downtime.*
-  > 
-  > *In summary, this project delivers a secure, observable, and resilient AI platform backed by enterprise cloud-native DevOps principles.*
-  > 
-  > *Thank you very much for your time and consideration!"*
+### 6. Cloud-Native Scalability & Production Migration Design
+- **What I worked on**: I authored the system design and operational strategy for scaling the platform.
+- **What I implemented**:
+  - Designed the **100–500 RPS scaling blueprint**, detailing horizontal pod autoscaling (HPA), token-bucket rate limiting, and asynchronous queue decoupling (Celery/SQS).
+  - Formulated the comprehensive **5-phase migration strategy** to transition a single EC2 server with 10 users to an AWS EKS and Aurora PostgreSQL Multi-AZ architecture serving 10,000 users with zero downtime.
 
 ---
 
