@@ -191,7 +191,7 @@ In enterprise deployments, local credentials should be replaced with an OpenID C
 |---|---|---|
 | **Admin** | Full system administration, metric inspection, configuration updates, and tenant management. | `POST /chat`, `GET /metrics`, `GET /health`, `GET /admin/*` |
 | **User** | Interactive AI inference, personal chat queries, and account profile view. | `POST /chat`, `GET /health` |
-| **Read-Only / Auditor** | Read-only inspection of system telemetry, audit logs, and reports without query generation. | `GET /health`, `GET /metrics` |
+| **Read-Only / Auditor** | Read-only access to operational telemetry. | `GET /health`, `GET /metrics` |
 
 In our codebase, RBAC is enforced via FastAPI dependency injection:
 ```python
@@ -203,19 +203,23 @@ def require_roles(allowed_roles: list[str]):
     return role_checker
 ```
 
+The demo permits `/chat` to `user` and `admin` roles; a `read_only` account is denied. `/metrics` remains available to the Prometheus scraper in this demo, so production deployments should restrict it to a private network or enforce gateway authentication.
+
 ---
 
 ## 5. Resilience: Fallback, Retries & Caching
 
 ### 1. Resilient LLM Gateway
-- **Configurable Timeout**: All LLM requests enforce an explicit timeout via `LLM_TIMEOUT` (default: 30 seconds). Slow requests abort early, triggering HTTP 504.
-- **Exponential Backoff Retries**: Upstream transient network drops or provider HTTP 429/503 errors trigger automatic retries (`time.sleep(1.0 ** attempt)`).
+- **Configurable Timeout**: The Gemini SDK HTTP client enforces `LLM_TIMEOUT` (default: 30 seconds). Slow requests abort early, triggering HTTP 504.
+- **Exponential Backoff Retries**: Each model receives two attempts with an exponential delay between attempts. If the primary model fails, the gateway tries the configured fallback model.
 - **Secondary Model Fallback**: If the primary model (`gemini-2.5-flash`) fails across retries, the gateway falls back seamlessly to `gemini-1.5-flash` before raising an error.
 - **Appropriate HTTP Status Codes**:
   - `504 Gateway Timeout`: Upstream provider exceeded deadline.
   - `502 Bad Gateway`: LLM provider outage or empty response.
   - `401 Unauthorized`: Missing or expired JWT.
   - `403 Forbidden`: Insufficient role privileges.
+
+The development fallback answer is used only when `LLM_API_KEY` is empty. Set `LLM_API_KEY` to use Gemini. Development generates a temporary JWT signing key if `JWT_SECRET` is empty; tokens from that mode do not survive process restarts. Configure the same randomly generated `JWT_SECRET` across all instances. Production startup requires an explicit key of at least 32 characters.
 
 ### 2. Redis Graceful Degradation
 If Redis crashes or becomes unreachable:
@@ -242,7 +246,8 @@ If Redis crashes or becomes unreachable:
 2. **Configure environment variables**:
    ```bash
    cp .env.example .env
-   # Edit .env and supply your GEMINI LLM_API_KEY
+   # Set JWT_SECRET to a private value and optionally set your Gemini LLM_API_KEY.
+   # Generate a signing key with: python -c "import secrets; print(secrets.token_urlsafe(32))"
    ```
 
 3. **Build and launch services**:
@@ -255,13 +260,19 @@ If Redis crashes or becomes unreachable:
    docker compose ps
    ```
 
-5. **Access Application & Tools**:
+5. **Create a login user** (run in an interactive terminal; the password is prompted and hashed):
+   ```bash
+   docker compose exec app python -m app.create_user --username alice --role user
+   ```
+   Use `--role admin` to create an administrator. Then sign in at `POST /auth/login`.
+
+6. **Access Application & Tools**:
    - **FastAPI Interactive Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
    - **Service Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
    - **Application Metrics**: [http://localhost:8000/metrics](http://localhost:8000/metrics)
    - **Prometheus Dashboard**: [http://localhost:9090](http://localhost:9090)
 
-6. **Shutdown**:
+7. **Shutdown**:
    ```bash
    docker compose down -v
    ```

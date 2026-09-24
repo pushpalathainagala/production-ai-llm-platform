@@ -107,7 +107,7 @@ def login(
 @app.post("/chat")
 def chat(
     chat_data: ChatRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_roles(["admin", "user"])),
 ):
     cache_key = f"chat:{chat_data.question.strip().lower()}"
 

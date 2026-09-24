@@ -2,6 +2,8 @@ import logging
 import time
 from typing import Tuple
 
+import httpx
+
 from app.config import settings
 from app.metrics import LLM_TOKEN_USAGE
 
@@ -10,7 +12,15 @@ logger = logging.getLogger(__name__)
 # Initialize client if API key is provided
 try:
     from google import genai
-    client = genai.Client(api_key=settings.LLM_API_KEY) if settings.LLM_API_KEY else None
+    from google.genai import types
+    client = (
+        genai.Client(
+            api_key=settings.LLM_API_KEY,
+            http_options=types.HttpOptions(timeout=int(settings.LLM_TIMEOUT * 1000)),
+        )
+        if settings.LLM_API_KEY
+        else None
+    )
 except Exception:
     client = None
 
@@ -59,24 +69,37 @@ def ask_gemini(question: str) -> Tuple[str, int, str]:
     timeout handling, and secondary model fallback.
     Returns: (answer_text, tokens_used, model_used)
     """
-    max_retries = 2
+    attempts_per_model = 2
     models_to_try = [settings.PRIMARY_MODEL, settings.FALLBACK_MODEL]
 
     last_error = None
     for model in models_to_try:
-        for attempt in range(max_retries):
+        for attempt in range(attempts_per_model):
             try:
                 answer, tokens = _call_model(model, question)
                 return answer, tokens, model
             except Exception as exc:
                 last_error = exc
                 err_msg = str(exc).lower()
-                logger.warning(
-                    f"LLM call to {model} attempt {attempt + 1}/{max_retries} failed: {exc}"
+                timed_out = isinstance(exc, httpx.TimeoutException) or any(
+                    marker in err_msg for marker in ("deadline", "timed out", "timeout")
                 )
-                if "deadline" in err_msg or "timed out" in err_msg or "timeout" in err_msg:
-                    if attempt == max_retries - 1 and model == models_to_try[-1]:
-                        raise LLMTimeoutError(f"LLM request timed out after {settings.LLM_TIMEOUT}s: {exc}") from exc
-                time.sleep(1.0 ** attempt)
+                logger.warning(
+                    f"LLM call to {model} attempt {attempt + 1}/{attempts_per_model} failed: {exc}"
+                )
+                if timed_out and model == models_to_try[-1] and attempt == attempts_per_model - 1:
+                    raise LLMTimeoutError(
+                        f"LLM request timed out after {settings.LLM_TIMEOUT}s: {exc}"
+                    ) from exc
+                if attempt < attempts_per_model - 1:
+                    time.sleep(2 ** attempt)
+
+    if last_error and (
+        isinstance(last_error, httpx.TimeoutException)
+        or any(marker in str(last_error).lower() for marker in ("deadline", "timed out", "timeout"))
+    ):
+        raise LLMTimeoutError(
+            f"LLM request timed out after {settings.LLM_TIMEOUT}s: {last_error}"
+        ) from last_error
 
     raise LLMProviderError(f"LLM requests failed across primary and fallback models: {last_error}") from last_error
